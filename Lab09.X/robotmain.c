@@ -26,11 +26,6 @@
 #define RUN         1
 #define DIAGNOSE    0
 
-#define ON_WHITE_SURFACE 0 //Exact value
-#define ON_BLACK_SURFACE 3000 // sum of sensor 1,2,3
-#define ON_EDGE 1000 //sensor 0 or 1
-#define ON_TRACK 1000 // sensor 2
-
 
 void Diagnostic_Menu(void);
 char Get_Number(void);
@@ -53,6 +48,9 @@ void main(void)
     char i, length, any, sensor;
     char msg[9];
     unsigned int sum, battery;
+    
+    unsigned int total_sum;
+    
     unsigned int* sensor_value;
     bool white, black;
             
@@ -72,7 +70,7 @@ void main(void)
             key = Get_Key();
             switch (key)
             {
-                case 'w':
+                case 'b':
                    /* printf("\n\r");
                     printf("\t Please enter the forward speed, 0 - 127 \r\n");
                     speed = Get_Number();
@@ -151,7 +149,7 @@ void main(void)
                     printf("\n\r");
 
                     //  Add code to read calibrated values of all sensors
-                    sensor_value = Calibrate_Sensors();
+                    sensor_value = Read_Calibrated_Sensors();
                     
                         for (i=0; i<5; i++)
                         {
@@ -272,7 +270,7 @@ void main(void)
                     while (1)
                     {    
                     
-                    sensor_value = Calibrate_Sensors();
+                    sensor_value = Read_Calibrated_Sensors();
                         
                       for (i=0; i<5; i++)
                       {
@@ -292,7 +290,7 @@ void main(void)
                     
                                      
                 case 'm':
-                    LCD_Clear();
+                LCD_Clear();
                     LCD_Position(0,0);
                     LCD_Print("Diagnose", 8);
                     battery = Read_Battery_Voltage();
@@ -301,13 +299,49 @@ void main(void)
                     LCD_Print(msg, length);
                     Diagnostic_Menu();
                     break;
+                    
+                case 'q':
+                    LCD_Clear();
+                    LCD_Position(0,0);
+                    LCD_Print("Spin", 4);
+                    printf("\n\r");
+                    printf("\t Please enter the spin speed (right), 0 - 127 \r\n");
+                    speed = Get_Number();
+                    Spin_Right(speed);
+                    length = sprintf(msg, " %u ", speed);
+                    LCD_Position(0,1);
+                    LCD_Print(msg, length);
+                    break;
+                    
+                case 'w':
+                    LCD_Clear();
+                    LCD_Position(0,0);
+                    LCD_Print("Spin", 4);
+                    printf("\n\r");
+                    printf("\t Please enter the spin speed (left), 0 - 127 \r\n");
+                    speed = Get_Number();
+                    Spin_Left(speed);
+                    length = sprintf(msg, " %u ", speed);
+                    LCD_Position(0,1);
+                    LCD_Print(msg, length);
+                    break;
+                    
+                case 'l':
+                    LCD_Clear();
+                    LCD_Position(0,0);
+                    LCD_Print("180",3);
+                    Full_Rotation_30();
+                    break;
+                    
+                case 'z':
+                    Go_1cm();
             }
         }
     }
 
     if (PORTBbits.RB5 == RUN)       //  Run line-following code
     {
-        Diagnostic_Menu();
+       Diagnostic_Menu();
         LCD_Clear();
         LCD_Position(0,0);
         LCD_Print("  Run   ", 8);
@@ -318,47 +352,106 @@ void main(void)
         __delay_ms(1000);       //  Delay allows user to quickly read voltage
         LCD_Position(0,0);
         LCD_Print("Auto Cal", 8);
-        Auto_Calibrate();
-	    LCD_Position(0,1);
-    	LCD_Print("  done  ", 8);
-        Countdown(6);
-        __delay_ms(1);
-        //  Start robot moving using 3pi PD function
-        //  Speed = 30; a = 1; b = 20; c = 3; d = 2
-        Turn_PD_ON();
+       Auto_Calibrate();
+	   LCD_Position(0,1);
+       LCD_Print("  done  ", 8);
+       Countdown(5);
+       TMR0_Write16BitTimer(0);
+       TMR0_Initialize(T0_16_BIT & T0_POST_1_1, T0_PRE_1_512 & T0_SOURCE_INT & T0_SYNC);
         
+        //  Start robot moving using 3pi PID function
+        //  Speed = 30; a = 1; b = 20; c = 3; d = 2
         while(1)
+    {            
+                   
+    sensor_value = Read_Calibrated_Sensors();
+    
+    sum = sensor_value[0]+sensor_value[1]+sensor_value[3];
+    total_sum = sensor_value[0]+sensor_value[1]+sensor_value[2]+sensor_value[3]+sensor_value[4];
+    
+    length = sprintf(msg, "%u/%u", sum, total_sum);
+    LCD_Position(1,0);
+    LCD_Print(msg, length);
+    
+   if (sensor_value[4] < 100 && sensor_value[0] < 100 && sensor_value[2] > 100) // PID default
+    {
+       LCD_Position(0,1);
+       LCD_Print("PID", 3);
+        Turn_PID_ON ();
+    }
+
+    if(total_sum > 4500)           //  this either a cross-over or the actual landing PAD
+    {
+       LCD_Clear();
+       LCD_Position(0,1);
+       LCD_Print("PAD", 3);
+       Turn_PID_OFF();
+       Landing_Pad();
+    }
+
+    if (total_sum < 100) // for gap, turn off PID and go forward 
+    {
+      Forward(20);
+      LCD_Clear();
+      LCD_Position(0,1);
+      LCD_Print("GAP", 3);
+      Turn_PID_OFF();
+      Gap();
+    }
+
+    if (sensor_value[4] >= 990 && sum < 100) // If the right sensor[4] detects black,go right.
+    { 
+       LCD_Position(0,1);
+       LCD_Print("RTURN", 4);
+
+       Turn_PID_OFF();
+       Correct_Path_To_Right();
+       Turn_PID_ON();
+    }
+
+    if (sensor_value[3] > 200 && sensor_value[4] > 200)
+    {
+        LCD_Position(0,1);
+        LCD_Print("RSHARP", 6);
+
+        Turn_PID_OFF();
+        for (int i = 0; i < 2; i++)
         {
-            sensor_value = Read_Calibrated_Sensors();
-            sum = sensor_value[1]+sensor_value[2]+sensor_value[3];
-            
-            length = sprintf(msg, " %u ", sum);
-            LCD_Position(0,1);
-            LCD_Print(msg, length);
-            
-           //#define ON_WHITE_SURFACE 0 //Exact value
-           //#define ON_BLACK_SURFACE 3000 // sum of sensor 1,2,3
-           //#define ON_EDGE 1000 //sensor 0 or 1
-           //#define ON_TRACK 1000 // sensor 2
-            
-            
-            if(sum == ON_WHITE_SURFACE)           //  Robot stops when all three middle sensors see white
-            {
-                while(!UART1_is_tx_ready()) continue;
-                UART1_Write(0xBC);
-            }
-            
-            else if (sensor_value[2] <1000) // 
-            {
-                UART1_Write(0xBC);
-                Forward(20);
-                __delay_ms(1000);
-                Turn_PD_ON();
-            }
-          
+            Go_1cm();
         }
+        Correct_Path_To_Right();
+        Turn_PID_ON();
+    }
+
+    if(sensor_value[0] > 200 && sensor_value[1] > 200)
+    {
+        LCD_Position(0,1);
+        LCD_Print("LSHARP", 6);
+
+        Turn_PID_OFF();
+        for (int i = 0; i < 2; i++)
+        {
+            Go_1cm();
+        }
+        Correct_Path_To_Left();
+        Turn_PID_ON();
+    }
+
+    if (sensor_value[0] >= 990 && sum < 100) //sensor[4] is the right one and sensor[0] is the left sensor
+    {
+       LCD_Clear();
+       LCD_Position(0,1);
+       LCD_Print("LTURN", 4);
+
+       Turn_PID_OFF();
+       Correct_Path_To_Left();
+       Turn_PID_ON();
+    }
+        
+    }
     }
 }
+
 
 void Diagnostic_Menu (void)
 {
@@ -386,6 +479,9 @@ void Diagnostic_Menu (void)
     printf("\r\n");
     printf("  m \t\t Refresh (m)enu \r\n");
     printf("\n\r");
+    printf(" q \t\t spin the robot right (clockwise)\r\n");
+    printf(" w \t\t spin the robot left (counter-clockwise)\r\n");
+    printf("l  \t\t do a 180 degree rotation at 30 cm/s \r\n");
 }
 
 //  Reads digit characters and returns a numerical value
